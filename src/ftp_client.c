@@ -1,5 +1,6 @@
 #include "ftp_app.h"
 
+#include <direct.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,6 +41,29 @@ static int local_file_exists(const char *path)
 
     fclose(file);
     return 1;
+}
+
+static int change_local_directory(const char *path)
+{
+    char current_dir[FTP_MAX_PATH_LEN];
+
+    if (path == NULL || path[0] == '\0') {
+        printf("usage: lcd <dir>\n");
+        return 0;
+    }
+
+    if (_chdir(path) != 0) {
+        printf("failed to change local directory: %s\n", path);
+        return 0;
+    }
+
+    if (_getcwd(current_dir, (int)sizeof(current_dir)) == NULL) {
+        printf("local directory changed, but current path read failed\n");
+        return 0;
+    }
+
+    printf("local directory: %s\n", current_dir);
+    return 0;
 }
 
 static int recv_line(SOCKET socket_handle, char *buffer, size_t buffer_size)
@@ -258,6 +282,11 @@ int ftp_client_run(const char *host, unsigned short port)
             break;
         }
         line[strcspn(line, "\r\n")] = '\0';
+
+        if (_strnicmp(line, "lcd ", 4) == 0) {
+            change_local_directory(line + 4);
+            continue;
+        }
 
         if (_strnicmp(line, "get ", 4) == 0) {
             if (handle_get(client_socket, line + 4) != 0) {

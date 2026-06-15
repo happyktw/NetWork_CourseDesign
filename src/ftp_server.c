@@ -125,6 +125,25 @@ static int handle_dir(SOCKET client_socket)
     return send_text_line(client_socket, response);
 }
 
+static int handle_cd(SOCKET client_socket, const char *path)
+{
+    char current_dir[FTP_MAX_PATH_LEN];
+
+    if (path == NULL || path[0] == '\0') {
+        return send_text_line(client_socket, "ERR missing directory name, usage: cd <dir>");
+    }
+
+    if (_chdir(path) != 0) {
+        return send_text_line(client_socket, "ERR failed to change directory");
+    }
+
+    if (_getcwd(current_dir, (int)sizeof(current_dir)) == NULL) {
+        return send_text_line(client_socket, "ERR changed directory but failed to read current path");
+    }
+
+    return send_text_line(client_socket, current_dir);
+}
+
 static int handle_get(SOCKET client_socket, const char *path)
 {
     FILE *file;
@@ -273,6 +292,8 @@ ftp_command_type_t ftp_parse_command(const char *line, ftp_command_t *command)
         command->type = FTP_CMD_PWD;
     } else if (_stricmp(token, "dir") == 0 || _stricmp(token, "ls") == 0) {
         command->type = FTP_CMD_DIR;
+    } else if (_stricmp(token, "cd") == 0) {
+        command->type = FTP_CMD_CD;
     } else if (_stricmp(token, "get") == 0) {
         command->type = FTP_CMD_GET;
     } else if (_stricmp(token, "put") == 0) {
@@ -308,7 +329,7 @@ static int handle_client_session(SOCKET client_socket)
         ftp_parse_command(line, &command);
         switch (command.type) {
             case FTP_CMD_HELP:
-                if (send_text_line(client_socket, "COMMANDS: help pwd dir get <file> put <file> quit") != 0) {
+                if (send_text_line(client_socket, "COMMANDS: help pwd dir cd <dir> get <file> put <file> quit") != 0) {
                     return -1;
                 }
                 break;
@@ -319,6 +340,11 @@ static int handle_client_session(SOCKET client_socket)
                 break;
             case FTP_CMD_DIR:
                 if (handle_dir(client_socket) != 0) {
+                    return -1;
+                }
+                break;
+            case FTP_CMD_CD:
+                if (handle_cd(client_socket, command.argument) != 0) {
                     return -1;
                 }
                 break;

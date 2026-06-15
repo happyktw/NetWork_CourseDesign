@@ -11,6 +11,7 @@ typedef enum ftp_command_type {
     FTP_CMD_HELP,
     FTP_CMD_PWD,
     FTP_CMD_DIR,
+    FTP_CMD_CD,
     FTP_CMD_GET,
     FTP_CMD_PUT,
     FTP_CMD_QUIT
