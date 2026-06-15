@@ -98,6 +98,73 @@ static int run_capture_demo(void)
     return 0;
 }
 
+static int run_live_capture(const char *local_ip)
+{
+    SOCKET capture_socket;
+    uint8_t raw_packet[65535];
+    uint8_t parse_buffer[sizeof(ethernet_header_t) + 65535];
+    ethernet_header_t *ethernet;
+    parsed_packet_t packet;
+    packet_parse_result_t result;
+    nw_endpoint_t remote_endpoint;
+    nw_ssize_t received_length;
+    int init_status;
+
+    init_status = nw_init_winsock();
+    if (init_status != 0) {
+        log_socket_error("WSAStartup", init_status);
+        return 1;
+    }
+
+    capture_socket = nw_create_raw_ipv4_socket(IPPROTO_IP);
+    if (capture_socket == INVALID_SOCKET) {
+        log_socket_error("create capture socket", nw_last_error());
+        log_message(LOG_LEVEL_WARN, "live capture usually requires administrator privileges on Windows");
+        nw_cleanup_winsock();
+        return 1;
+    }
+
+    if (nw_set_promiscuous_mode(capture_socket, local_ip) != 0) {
+        log_socket_error("enable promiscuous mode", nw_last_error());
+        nw_close_socket(capture_socket);
+        nw_cleanup_winsock();
+        return 1;
+    }
+
+    printf("capture listening on %s, waiting for one IPv4 packet...\n", local_ip);
+    received_length = nw_recv_raw_bytes(capture_socket, raw_packet, sizeof(raw_packet), &remote_endpoint);
+    if (received_length <= 0) {
+        log_socket_error("receive raw packet", nw_last_error());
+        nw_close_socket(capture_socket);
+        nw_cleanup_winsock();
+        return 1;
+    }
+
+    memset(parse_buffer, 0, sizeof(ethernet_header_t));
+    ethernet = (ethernet_header_t *)parse_buffer;
+    ethernet->ether_type = htons(ETHER_TYPE_IPV4);
+    memcpy(parse_buffer + sizeof(ethernet_header_t), raw_packet, (size_t)received_length);
+
+    result = parse_ethernet_ipv4_packet(
+        parse_buffer,
+        sizeof(ethernet_header_t) + (size_t)received_length,
+        &packet
+    );
+    if (result != PACKET_PARSE_OK) {
+        log_message(LOG_LEVEL_ERROR, "captured packet parse failed, code=%d", (int)result);
+        nw_close_socket(capture_socket);
+        nw_cleanup_winsock();
+        return 1;
+    }
+
+    printf("captured one packet from %s\n", remote_endpoint.host[0] != '\0' ? remote_endpoint.host : local_ip);
+    print_parsed_packet_summary(&packet);
+
+    nw_close_socket(capture_socket);
+    nw_cleanup_winsock();
+    return 0;
+}
+
 static void fill_ping_payload(uint8_t *payload, size_t payload_length)
 {
     size_t index;
@@ -255,8 +322,11 @@ int main(int argc, char *argv[])
         if (argc == 3 && strcmp(argv[2], "demo") == 0) {
             return run_capture_demo();
         }
-        log_message(LOG_LEVEL_WARN, "live capture is pending, try: capture demo");
-        return 0;
+        if (argc != 3) {
+            print_usage(argv[0]);
+            return 1;
+        }
+        return run_live_capture(argv[2]);
     }
 
     print_usage(argv[0]);
