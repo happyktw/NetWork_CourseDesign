@@ -14,6 +14,13 @@
 #define IP_PROTO_TCP  6u
 #define IP_PROTO_UDP  17u
 
+#define TCP_FLAG_FIN 0x01u
+#define TCP_FLAG_SYN 0x02u
+#define TCP_FLAG_RST 0x04u
+#define TCP_FLAG_PSH 0x08u
+#define TCP_FLAG_ACK 0x10u
+#define TCP_FLAG_URG 0x20u
+
 #define ICMP_TYPE_ECHO_REPLY   0u
 #define ICMP_TYPE_ECHO_REQUEST 8u
 #define ICMP_DEFAULT_DATA_SIZE 32u
@@ -135,5 +142,8 @@ int parse_icmp_echo_reply(
 
 void format_mac_address(const uint8_t address[ETH_ADDR_LEN], char *output, size_t output_size);
 void format_ipv4_address(uint32_t network_order_ip, char *output, size_t output_size);
+const char *ip_protocol_name(uint8_t protocol);
+void format_tcp_flags(uint8_t flags, char *output, size_t output_size);
+void print_parsed_packet_summary(const parsed_packet_t *packet);
 
 #endif

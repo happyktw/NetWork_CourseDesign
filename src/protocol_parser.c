@@ -217,3 +217,117 @@ void format_ipv4_address(uint32_t network_order_ip, char *output, size_t output_
     strncpy(output, text, output_size - 1U);
     output[output_size - 1U] = '\0';
 }
+
+const char *ip_protocol_name(uint8_t protocol)
+{
+    switch (protocol) {
+        case IP_PROTO_ICMP: return "ICMP";
+        case IP_PROTO_TCP: return "TCP";
+        case IP_PROTO_UDP: return "UDP";
+        default: return "OTHER";
+    }
+}
+
+void format_tcp_flags(uint8_t flags, char *output, size_t output_size)
+{
+    size_t used;
+
+    if (output == NULL || output_size == 0) {
+        return;
+    }
+
+    output[0] = '\0';
+    used = 0;
+
+    if ((flags & TCP_FLAG_FIN) != 0U && used + 4U < output_size) {
+        strncpy(output + used, "FIN ", output_size - used - 1U);
+        used += 4U;
+    }
+    if ((flags & TCP_FLAG_SYN) != 0U && used + 4U < output_size) {
+        strncpy(output + used, "SYN ", output_size - used - 1U);
+        used += 4U;
+    }
+    if ((flags & TCP_FLAG_RST) != 0U && used + 4U < output_size) {
+        strncpy(output + used, "RST ", output_size - used - 1U);
+        used += 4U;
+    }
+    if ((flags & TCP_FLAG_PSH) != 0U && used + 4U < output_size) {
+        strncpy(output + used, "PSH ", output_size - used - 1U);
+        used += 4U;
+    }
+    if ((flags & TCP_FLAG_ACK) != 0U && used + 4U < output_size) {
+        strncpy(output + used, "ACK ", output_size - used - 1U);
+        used += 4U;
+    }
+    if ((flags & TCP_FLAG_URG) != 0U && used + 4U < output_size) {
+        strncpy(output + used, "URG ", output_size - used - 1U);
+        used += 4U;
+    }
+
+    if (used == 0) {
+        strncpy(output, "NONE", output_size - 1U);
+        output[output_size - 1U] = '\0';
+        return;
+    }
+
+    if (used > 0 && output[used - 1U] == ' ') {
+        output[used - 1U] = '\0';
+    }
+}
+
+void print_parsed_packet_summary(const parsed_packet_t *packet)
+{
+    char source_mac[32];
+    char destination_mac[32];
+    char source_ip[32];
+    char destination_ip[32];
+
+    if (packet == NULL || packet->ethernet == NULL || packet->ipv4 == NULL) {
+        printf("packet summary unavailable\n");
+        return;
+    }
+
+    format_mac_address(packet->ethernet->source, source_mac, sizeof(source_mac));
+    format_mac_address(packet->ethernet->destination, destination_mac, sizeof(destination_mac));
+    format_ipv4_address(packet->ipv4->source_ip, source_ip, sizeof(source_ip));
+    format_ipv4_address(packet->ipv4->destination_ip, destination_ip, sizeof(destination_ip));
+
+    printf("Ethernet: %s -> %s, type=0x%04X\n",
+        source_mac,
+        destination_mac,
+        ntohs(packet->ethernet->ether_type));
+    printf("IPv4: %s -> %s, ttl=%u, protocol=%s, payload=%lu bytes\n",
+        source_ip,
+        destination_ip,
+        (unsigned int)packet->ipv4->ttl,
+        ip_protocol_name(packet->ipv4->protocol),
+        (unsigned long)packet->payload_length);
+
+    if (packet->icmp != NULL) {
+        printf("ICMP: type=%u code=%u id=%u seq=%u\n",
+            (unsigned int)packet->icmp->type,
+            (unsigned int)packet->icmp->code,
+            (unsigned int)ntohs(packet->icmp->identifier),
+            (unsigned int)ntohs(packet->icmp->sequence_number));
+        return;
+    }
+
+    if (packet->tcp != NULL) {
+        char tcp_flags[64];
+        format_tcp_flags(packet->tcp->flags, tcp_flags, sizeof(tcp_flags));
+        printf("TCP: %u -> %u, seq=%lu ack=%lu flags=%s\n",
+            (unsigned int)ntohs(packet->tcp->source_port),
+            (unsigned int)ntohs(packet->tcp->destination_port),
+            (unsigned long)ntohl(packet->tcp->sequence_number),
+            (unsigned long)ntohl(packet->tcp->acknowledgement_number),
+            tcp_flags);
+        return;
+    }
+
+    if (packet->udp != NULL) {
+        printf("UDP: %u -> %u, length=%u\n",
+            (unsigned int)ntohs(packet->udp->source_port),
+            (unsigned int)ntohs(packet->udp->destination_port),
+            (unsigned int)ntohs(packet->udp->length));
+    }
+}

@@ -5,6 +5,7 @@
 #include "datalink_sim.h"
 #include "ftp_app.h"
 #include "network_io.h"
+#include "protocol_structs.h"
 #include "utils.h"
 
 #include <iphlpapi.h>
@@ -41,6 +42,60 @@ static int run_datalink_demo(void)
     datalink_simulator_print_stats(simulator);
     datalink_simulator_destroy(simulator);
     return status;
+}
+
+static int run_capture_demo(void)
+{
+    uint8_t packet_buffer[sizeof(ethernet_header_t) + sizeof(ipv4_header_t) + sizeof(tcp_header_t)];
+    ethernet_header_t *ethernet;
+    ipv4_header_t *ipv4;
+    tcp_header_t *tcp;
+    parsed_packet_t packet;
+    packet_parse_result_t result;
+
+    memset(packet_buffer, 0, sizeof(packet_buffer));
+
+    ethernet = (ethernet_header_t *)packet_buffer;
+    ethernet->destination[0] = 0x00;
+    ethernet->destination[1] = 0x11;
+    ethernet->destination[2] = 0x22;
+    ethernet->destination[3] = 0x33;
+    ethernet->destination[4] = 0x44;
+    ethernet->destination[5] = 0x55;
+    ethernet->source[0] = 0x66;
+    ethernet->source[1] = 0x77;
+    ethernet->source[2] = 0x88;
+    ethernet->source[3] = 0x99;
+    ethernet->source[4] = 0xAA;
+    ethernet->source[5] = 0xBB;
+    ethernet->ether_type = htons(ETHER_TYPE_IPV4);
+
+    ipv4 = (ipv4_header_t *)(packet_buffer + sizeof(ethernet_header_t));
+    ipv4->version_ihl = 0x45;
+    ipv4->total_length = htons((uint16_t)(sizeof(ipv4_header_t) + sizeof(tcp_header_t)));
+    ipv4->ttl = 64;
+    ipv4->protocol = IP_PROTO_TCP;
+    ipv4->source_ip = inet_addr("192.168.1.10");
+    ipv4->destination_ip = inet_addr("192.168.1.20");
+
+    tcp = (tcp_header_t *)(packet_buffer + sizeof(ethernet_header_t) + sizeof(ipv4_header_t));
+    tcp->source_port = htons(12345);
+    tcp->destination_port = htons(80);
+    tcp->sequence_number = htonl(1001UL);
+    tcp->acknowledgement_number = htonl(2002UL);
+    tcp->data_offset_reserved = (uint8_t)(5U << 4);
+    tcp->flags = (uint8_t)(TCP_FLAG_SYN | TCP_FLAG_ACK);
+    tcp->window_size = htons(4096);
+
+    result = parse_ethernet_ipv4_packet(packet_buffer, sizeof(packet_buffer), &packet);
+    if (result != PACKET_PARSE_OK) {
+        log_message(LOG_LEVEL_ERROR, "capture demo parse failed, code=%d", (int)result);
+        return 1;
+    }
+
+    printf("capture demo packet parsed successfully:\n");
+    print_parsed_packet_summary(&packet);
+    return 0;
 }
 
 static void fill_ping_payload(uint8_t *payload, size_t payload_length)
@@ -197,7 +252,10 @@ int main(int argc, char *argv[])
     }
 
     if (strcmp(argv[1], "capture") == 0) {
-        log_message(LOG_LEVEL_WARN, "packet capture module is reserved for the next implementation step");
+        if (argc == 3 && strcmp(argv[2], "demo") == 0) {
+            return run_capture_demo();
+        }
+        log_message(LOG_LEVEL_WARN, "live capture is pending, try: capture demo");
         return 0;
     }
 
