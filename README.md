@@ -18,8 +18,8 @@ cmake --build build
 
 ```powershell
 .\build\network_course_design.exe help
-.\build\network_course_design.exe ftp-server 2121
-.\build\network_course_design.exe ftp-client 127.0.0.1 2121
+.\build\network_course_design.exe ftp-server 2493
+.\build\network_course_design.exe ftp-client 127.0.0.1 2493
 .\build\network_course_design.exe datalink-demo
 ```
 

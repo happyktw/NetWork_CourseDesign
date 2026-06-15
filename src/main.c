@@ -19,7 +19,36 @@ static void print_usage(const char *program_name)
     printf("  %s ftp-client <host> <port>\n", program_name);
     printf("  %s datalink-demo\n", program_name);
     printf("  %s ping <host> [-t]\n", program_name);
-    printf("  %s capture <local-ip>\n", program_name);
+    printf("  %s capture demo [tcp|udp|icmp]\n", program_name);
+    printf("  %s capture <local-ip> [tcp|udp|icmp]\n", program_name);
+}
+
+static int parse_capture_protocol_filter(const char *text)
+{
+    if (text == NULL || text[0] == '\0') {
+        return 0;
+    }
+    if (_stricmp(text, "tcp") == 0) {
+        return IP_PROTO_TCP;
+    }
+    if (_stricmp(text, "udp") == 0) {
+        return IP_PROTO_UDP;
+    }
+    if (_stricmp(text, "icmp") == 0) {
+        return IP_PROTO_ICMP;
+    }
+    return -1;
+}
+
+static int packet_matches_protocol_filter(const parsed_packet_t *packet, int protocol_filter)
+{
+    if (packet == NULL || packet->ipv4 == NULL) {
+        return 0;
+    }
+    if (protocol_filter == 0) {
+        return 1;
+    }
+    return packet->ipv4->protocol == (uint8_t)protocol_filter;
 }
 
 static int run_datalink_demo(void)
@@ -44,14 +73,20 @@ static int run_datalink_demo(void)
     return status;
 }
 
-static int run_capture_demo(void)
+static int run_capture_demo(int protocol_filter)
 {
-    static const uint8_t demo_payload[] = "HELLO_TCP_DEMO";
-    uint8_t packet_buffer[sizeof(ethernet_header_t) + sizeof(ipv4_header_t) + sizeof(tcp_header_t) + sizeof(demo_payload) - 1U];
+    static const uint8_t tcp_payload[] = "HELLO_TCP_DEMO";
+    static const uint8_t udp_payload[] = "HELLO_UDP_DEMO";
+    static const uint8_t icmp_payload[] = "HELLO_ICMP_DEMO";
+    uint8_t packet_buffer[sizeof(ethernet_header_t) + sizeof(ipv4_header_t) + sizeof(tcp_header_t) + 32U];
     ethernet_header_t *ethernet;
     ipv4_header_t *ipv4;
     tcp_header_t *tcp;
+    udp_header_t *udp;
+    icmp_header_t *icmp;
     uint8_t *payload;
+    size_t payload_length;
+    size_t transport_length;
     parsed_packet_t packet;
     packet_parse_result_t result;
 
@@ -74,25 +109,55 @@ static int run_capture_demo(void)
 
     ipv4 = (ipv4_header_t *)(packet_buffer + sizeof(ethernet_header_t));
     ipv4->version_ihl = 0x45;
-    ipv4->total_length = htons((uint16_t)(sizeof(ipv4_header_t) + sizeof(tcp_header_t) + sizeof(demo_payload) - 1U));
     ipv4->ttl = 64;
-    ipv4->protocol = IP_PROTO_TCP;
     ipv4->source_ip = inet_addr("192.168.1.10");
     ipv4->destination_ip = inet_addr("192.168.1.20");
+    payload = packet_buffer + sizeof(ethernet_header_t) + sizeof(ipv4_header_t);
 
-    tcp = (tcp_header_t *)(packet_buffer + sizeof(ethernet_header_t) + sizeof(ipv4_header_t));
-    tcp->source_port = htons(12345);
-    tcp->destination_port = htons(80);
-    tcp->sequence_number = htonl(1001UL);
-    tcp->acknowledgement_number = htonl(2002UL);
-    tcp->data_offset_reserved = (uint8_t)(5U << 4);
-    tcp->flags = (uint8_t)(TCP_FLAG_PSH | TCP_FLAG_ACK);
-    tcp->window_size = htons(4096);
+    if (protocol_filter == IP_PROTO_UDP) {
+        ipv4->protocol = IP_PROTO_UDP;
+        udp = (udp_header_t *)payload;
+        udp->source_port = htons(5353);
+        udp->destination_port = htons(8000);
+        payload += sizeof(udp_header_t);
+        memcpy(payload, udp_payload, sizeof(udp_payload) - 1U);
+        payload_length = sizeof(udp_payload) - 1U;
+        udp->length = htons((uint16_t)(sizeof(udp_header_t) + payload_length));
+        transport_length = sizeof(udp_header_t) + payload_length;
+    } else if (protocol_filter == IP_PROTO_ICMP) {
+        ipv4->protocol = IP_PROTO_ICMP;
+        icmp = (icmp_header_t *)payload;
+        icmp->type = ICMP_TYPE_ECHO_REPLY;
+        icmp->code = 0;
+        icmp->identifier = htons(7);
+        icmp->sequence_number = htons(3);
+        payload += sizeof(icmp_header_t);
+        memcpy(payload, icmp_payload, sizeof(icmp_payload) - 1U);
+        payload_length = sizeof(icmp_payload) - 1U;
+        transport_length = sizeof(icmp_header_t) + payload_length;
+    } else {
+        ipv4->protocol = IP_PROTO_TCP;
+        tcp = (tcp_header_t *)payload;
+        tcp->source_port = htons(12345);
+        tcp->destination_port = htons(80);
+        tcp->sequence_number = htonl(1001UL);
+        tcp->acknowledgement_number = htonl(2002UL);
+        tcp->data_offset_reserved = (uint8_t)(5U << 4);
+        tcp->flags = (uint8_t)(TCP_FLAG_PSH | TCP_FLAG_ACK);
+        tcp->window_size = htons(4096);
+        payload += sizeof(tcp_header_t);
+        memcpy(payload, tcp_payload, sizeof(tcp_payload) - 1U);
+        payload_length = sizeof(tcp_payload) - 1U;
+        transport_length = sizeof(tcp_header_t) + payload_length;
+    }
 
-    payload = packet_buffer + sizeof(ethernet_header_t) + sizeof(ipv4_header_t) + sizeof(tcp_header_t);
-    memcpy(payload, demo_payload, sizeof(demo_payload) - 1U);
+    ipv4->total_length = htons((uint16_t)(sizeof(ipv4_header_t) + transport_length));
 
-    result = parse_ethernet_ipv4_packet(packet_buffer, sizeof(packet_buffer), &packet);
+    result = parse_ethernet_ipv4_packet(
+        packet_buffer,
+        sizeof(ethernet_header_t) + sizeof(ipv4_header_t) + transport_length,
+        &packet
+    );
     if (result != PACKET_PARSE_OK) {
         log_message(LOG_LEVEL_ERROR, "capture demo parse failed, code=%d", (int)result);
         return 1;
@@ -103,7 +168,7 @@ static int run_capture_demo(void)
     return 0;
 }
 
-static int run_live_capture(const char *local_ip)
+static int run_live_capture(const char *local_ip, int protocol_filter)
 {
     SOCKET capture_socket;
     uint8_t raw_packet[65535];
@@ -114,6 +179,7 @@ static int run_live_capture(const char *local_ip)
     nw_endpoint_t remote_endpoint;
     nw_ssize_t received_length;
     int init_status;
+    unsigned int attempts;
 
     init_status = nw_init_winsock();
     if (init_status != 0) {
@@ -136,38 +202,48 @@ static int run_live_capture(const char *local_ip)
         return 1;
     }
 
-    printf("capture listening on %s, waiting for one IPv4 packet...\n", local_ip);
-    received_length = nw_recv_raw_bytes(capture_socket, raw_packet, sizeof(raw_packet), &remote_endpoint);
-    if (received_length <= 0) {
-        log_socket_error("receive raw packet", nw_last_error());
+    printf("capture listening on %s", local_ip);
+    if (protocol_filter != 0) {
+        printf(", filter=%s", ip_protocol_name((uint8_t)protocol_filter));
+    }
+    printf(", waiting for one matching IPv4 packet...\n");
+
+    for (attempts = 0; attempts < 20U; ++attempts) {
+        received_length = nw_recv_raw_bytes(capture_socket, raw_packet, sizeof(raw_packet), &remote_endpoint);
+        if (received_length <= 0) {
+            continue;
+        }
+
+        memset(parse_buffer, 0, sizeof(ethernet_header_t));
+        ethernet = (ethernet_header_t *)parse_buffer;
+        ethernet->ether_type = htons(ETHER_TYPE_IPV4);
+        memcpy(parse_buffer + sizeof(ethernet_header_t), raw_packet, (size_t)received_length);
+
+        result = parse_ethernet_ipv4_packet(
+            parse_buffer,
+            sizeof(ethernet_header_t) + (size_t)received_length,
+            &packet
+        );
+        if (result != PACKET_PARSE_OK) {
+            continue;
+        }
+
+        if (!packet_matches_protocol_filter(&packet, protocol_filter)) {
+            continue;
+        }
+
+        printf("captured one packet from %s\n", remote_endpoint.host[0] != '\0' ? remote_endpoint.host : local_ip);
+        print_parsed_packet_summary(&packet);
         nw_close_socket(capture_socket);
         nw_cleanup_winsock();
-        return 1;
+        return 0;
     }
 
-    memset(parse_buffer, 0, sizeof(ethernet_header_t));
-    ethernet = (ethernet_header_t *)parse_buffer;
-    ethernet->ether_type = htons(ETHER_TYPE_IPV4);
-    memcpy(parse_buffer + sizeof(ethernet_header_t), raw_packet, (size_t)received_length);
-
-    result = parse_ethernet_ipv4_packet(
-        parse_buffer,
-        sizeof(ethernet_header_t) + (size_t)received_length,
-        &packet
-    );
-    if (result != PACKET_PARSE_OK) {
-        log_message(LOG_LEVEL_ERROR, "captured packet parse failed, code=%d", (int)result);
-        nw_close_socket(capture_socket);
-        nw_cleanup_winsock();
-        return 1;
-    }
-
-    printf("captured one packet from %s\n", remote_endpoint.host[0] != '\0' ? remote_endpoint.host : local_ip);
-    print_parsed_packet_summary(&packet);
+    log_message(LOG_LEVEL_ERROR, "no matching packet captured within the current wait window");
 
     nw_close_socket(capture_socket);
     nw_cleanup_winsock();
-    return 0;
+    return 1;
 }
 
 static void fill_ping_payload(uint8_t *payload, size_t payload_length)
@@ -324,14 +400,28 @@ int main(int argc, char *argv[])
     }
 
     if (strcmp(argv[1], "capture") == 0) {
-        if (argc == 3 && strcmp(argv[2], "demo") == 0) {
-            return run_capture_demo();
+        int protocol_filter;
+
+        protocol_filter = 0;
+        if (argc == 4) {
+            protocol_filter = parse_capture_protocol_filter(argv[3]);
+            if (protocol_filter < 0) {
+                print_usage(argv[0]);
+                return 1;
+            }
         }
-        if (argc != 3) {
+
+        if (argc == 3 && strcmp(argv[2], "demo") == 0) {
+            return run_capture_demo(IP_PROTO_TCP);
+        }
+        if (argc == 4 && strcmp(argv[2], "demo") == 0) {
+            return run_capture_demo(protocol_filter);
+        }
+        if (argc != 3 && argc != 4) {
             print_usage(argv[0]);
             return 1;
         }
-        return run_live_capture(argv[2]);
+        return run_live_capture(argv[2], protocol_filter);
     }
 
     print_usage(argv[0]);
