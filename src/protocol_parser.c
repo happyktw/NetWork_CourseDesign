@@ -124,7 +124,7 @@ size_t build_icmp_echo_packet(
 
     memset(buffer, 0, total_length);
     header = (icmp_header_t *)buffer;
-    header->type = ICMP_ECHO_REQUEST;
+    header->type = ICMP_TYPE_ECHO_REQUEST;
     header->code = 0;
     header->identifier = htons(identifier);
     header->sequence_number = htons(sequence_number);
@@ -164,7 +164,7 @@ int parse_icmp_echo_reply(
     }
 
     icmp = (const icmp_header_t *)(buffer + ip_header_length);
-    if (icmp->type != ICMP_ECHO_REPLY || icmp->code != 0) {
+    if (icmp->type != ICMP_TYPE_ECHO_REPLY || icmp->code != 0) {
         return 0;
     }
 

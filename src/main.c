@@ -5,8 +5,10 @@
 #include "datalink_sim.h"
 #include "ftp_app.h"
 #include "network_io.h"
-#include "protocol_structs.h"
 #include "utils.h"
+
+#include <iphlpapi.h>
+#include <icmpapi.h>
 
 static void print_usage(const char *program_name)
 {
@@ -54,77 +56,19 @@ static void fill_ping_payload(uint8_t *payload, size_t payload_length)
     }
 }
 
-static int receive_ping_reply(
-    SOCKET raw_socket,
-    uint16_t identifier,
-    uint16_t expected_sequence,
-    DWORD *elapsed_ms
-)
-{
-    uint8_t receive_buffer[2048];
-    nw_endpoint_t remote_endpoint;
-    ULONGLONG start_tick;
-    ULONGLONG end_tick;
-    uint16_t received_sequence;
-    nw_ssize_t received_length;
-
-    start_tick = GetTickCount64();
-
-    for (;;) {
-        received_length = nw_recv_raw_bytes(
-            raw_socket,
-            receive_buffer,
-            sizeof(receive_buffer),
-            &remote_endpoint
-        );
-
-        if (received_length <= 0) {
-            return 0;
-        }
-
-        if (parse_icmp_echo_reply(
-            receive_buffer,
-            (size_t)received_length,
-            identifier,
-            &received_sequence
-        ) == 0) {
-            continue;
-        }
-
-        if (received_sequence != expected_sequence) {
-            continue;
-        }
-
-        end_tick = GetTickCount64();
-        if (elapsed_ms != NULL) {
-            *elapsed_ms = (DWORD)(end_tick - start_tick);
-        }
-
-        printf(
-            "Reply from %s: bytes=%d time=%lums icmp_seq=%u\n",
-            remote_endpoint.host,
-            ICMP_DEFAULT_DATA_SIZE,
-            (unsigned long)((elapsed_ms == NULL) ? 0U : *elapsed_ms),
-            (unsigned int)received_sequence
-        );
-        return 1;
-    }
-}
-
 static int run_ping(const char *host, int continuous_mode)
 {
-    SOCKET raw_socket;
+    HANDLE icmp_handle;
     char resolved_ipv4[64];
-    uint8_t payload[ICMP_DEFAULT_DATA_SIZE];
-    uint8_t packet_buffer[sizeof(icmp_header_t) + ICMP_DEFAULT_DATA_SIZE];
-    size_t packet_length;
+    uint8_t payload[32];
+    char reply_buffer[sizeof(ICMP_ECHO_REPLY) + 32 + 64];
+    IPAddr destination_ip;
+    PICMP_ECHO_REPLY echo_reply;
     int init_status;
-    uint16_t identifier;
-    uint16_t sequence_number;
     unsigned int sent_count;
     unsigned int received_count;
     int status;
-    DWORD elapsed_ms;
+    DWORD reply_count;
 
     init_status = nw_init_winsock();
     if (init_status != 0) {
@@ -138,25 +82,25 @@ static int run_ping(const char *host, int continuous_mode)
         return 1;
     }
 
-    raw_socket = nw_create_raw_ipv4_socket(IPPROTO_ICMP);
-    if (raw_socket == INVALID_SOCKET) {
-        log_message(
-            LOG_LEVEL_ERROR,
-            "failed to create raw ICMP socket for %s (%s), error=%d",
-            host,
-            resolved_ipv4,
-            nw_last_error()
-        );
-        log_message(LOG_LEVEL_WARN, "raw socket usually requires administrator privileges on Windows");
+    icmp_handle = IcmpCreateFile();
+    if (icmp_handle == INVALID_HANDLE_VALUE) {
+        log_message(LOG_LEVEL_ERROR, "failed to create ICMP handle, error=%lu", (unsigned long)GetLastError());
+        nw_cleanup_winsock();
+        return 1;
+    }
+
+    destination_ip = inet_addr(resolved_ipv4);
+    if (destination_ip == INADDR_NONE && strcmp(resolved_ipv4, "255.255.255.255") != 0) {
+        log_message(LOG_LEVEL_ERROR, "invalid destination IPv4 address: %s", resolved_ipv4);
+        IcmpCloseHandle(icmp_handle);
         nw_cleanup_winsock();
         return 1;
     }
 
     fill_ping_payload(payload, sizeof(payload));
-    identifier = (uint16_t)(GetCurrentProcessId() & 0xFFFFU);
-    sequence_number = 1;
     sent_count = 0;
     received_count = 0;
+    status = 0;
 
     printf("Pinging %s [%s] with %u bytes of data:\n",
         host,
@@ -164,38 +108,33 @@ static int run_ping(const char *host, int continuous_mode)
         (unsigned int)sizeof(payload));
 
     for (;;) {
-        packet_length = build_icmp_echo_packet(
-            packet_buffer,
-            sizeof(packet_buffer),
-            identifier,
-            sequence_number,
-            payload,
-            sizeof(payload)
+        reply_count = IcmpSendEcho(
+            icmp_handle,
+            destination_ip,
+            (LPVOID)payload,
+            (WORD)sizeof(payload),
+            NULL,
+            reply_buffer,
+            (DWORD)sizeof(reply_buffer),
+            1000
         );
 
-        if (packet_length == 0) {
-            log_message(LOG_LEVEL_ERROR, "failed to build ICMP echo request");
-            status = 1;
-            break;
-        }
-
-        if (nw_send_raw_bytes(raw_socket, packet_buffer, packet_length, resolved_ipv4) < 0) {
-            log_socket_error("send raw icmp", nw_last_error());
-            status = 1;
-            break;
-        }
-
         sent_count++;
-        elapsed_ms = 0;
-        if (receive_ping_reply(raw_socket, identifier, sequence_number, &elapsed_ms) != 0) {
+        if (reply_count > 0) {
+            echo_reply = (PICMP_ECHO_REPLY)reply_buffer;
             received_count++;
+            printf(
+                "Reply from %s: bytes=%u time=%lums TTL=%u\n",
+                resolved_ipv4,
+                (unsigned int)echo_reply->DataSize,
+                (unsigned long)echo_reply->RoundTripTime,
+                (unsigned int)echo_reply->Options.Ttl
+            );
         } else {
-            printf("Request timed out. icmp_seq=%u\n", (unsigned int)sequence_number);
+            printf("Request timed out.\n");
         }
 
-        sequence_number++;
         if (!continuous_mode && sent_count >= 4U) {
-            status = 0;
             break;
         }
 
@@ -208,7 +147,7 @@ static int run_ping(const char *host, int continuous_mode)
         received_count,
         sent_count - received_count);
 
-    nw_close_socket(raw_socket);
+    IcmpCloseHandle(icmp_handle);
     nw_cleanup_winsock();
     return status;
 }

@@ -14,8 +14,8 @@
 #define IP_PROTO_TCP  6u
 #define IP_PROTO_UDP  17u
 
-#define ICMP_ECHO_REPLY   0u
-#define ICMP_ECHO_REQUEST 8u
+#define ICMP_TYPE_ECHO_REPLY   0u
+#define ICMP_TYPE_ECHO_REQUEST 8u
 #define ICMP_DEFAULT_DATA_SIZE 32u
 
 #define FTP_MAX_COMMAND_LEN 512
