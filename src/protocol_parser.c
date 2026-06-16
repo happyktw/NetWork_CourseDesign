@@ -10,6 +10,36 @@
 
 #define PACKET_PREVIEW_BYTES 16U
 
+static void format_ipv4_fragment_info(
+    uint16_t flags_fragment_offset,
+    char *output,
+    size_t output_size
+)
+{
+    uint16_t host_value;
+    unsigned int fragment_offset;
+    int has_more_fragments;
+    int dont_fragment;
+
+    if (output == NULL || output_size == 0) {
+        return;
+    }
+
+    host_value = ntohs(flags_fragment_offset);
+    fragment_offset = (unsigned int)(host_value & 0x1FFFu);
+    dont_fragment = ((host_value & 0x4000u) != 0u);
+    has_more_fragments = ((host_value & 0x2000u) != 0u);
+
+    (void)snprintf(
+        output,
+        output_size,
+        "DF=%s MF=%s offset=%u",
+        dont_fragment ? "1" : "0",
+        has_more_fragments ? "1" : "0",
+        fragment_offset
+    );
+}
+
 int ipv4_get_version(const ipv4_header_t *header)
 {
     return (header == NULL) ? -1 : ((header->version_ihl >> 4) & 0x0F);
@@ -320,6 +350,10 @@ void print_parsed_packet_summary(const parsed_packet_t *packet)
     char destination_mac[32];
     char source_ip[32];
     char destination_ip[32];
+    char fragment_info[64];
+    size_t ip_header_length;
+    unsigned int ip_total_length;
+    unsigned int ip_payload_length;
 
     if (packet == NULL || packet->ethernet == NULL || packet->ipv4 == NULL) {
         printf("packet summary unavailable\n");
@@ -330,17 +364,27 @@ void print_parsed_packet_summary(const parsed_packet_t *packet)
     format_mac_address(packet->ethernet->destination, destination_mac, sizeof(destination_mac));
     format_ipv4_address(packet->ipv4->source_ip, source_ip, sizeof(source_ip));
     format_ipv4_address(packet->ipv4->destination_ip, destination_ip, sizeof(destination_ip));
+    format_ipv4_fragment_info(packet->ipv4->flags_fragment_offset, fragment_info, sizeof(fragment_info));
+    ip_header_length = (size_t)ipv4_get_header_length(packet->ipv4);
+    ip_total_length = (unsigned int)ntohs(packet->ipv4->total_length);
+    ip_payload_length = (ip_total_length >= ip_header_length) ? (unsigned int)(ip_total_length - ip_header_length) : 0U;
 
     printf("Ethernet: %s -> %s, type=0x%04X\n",
         source_mac,
         destination_mac,
         ntohs(packet->ethernet->ether_type));
-    printf("IPv4: %s -> %s, ttl=%u, protocol=%s, payload=%lu bytes\n",
+    printf("IPv4: %s -> %s, version=%d ihl=%lu total=%u ttl=%u protocol=%s\n",
         source_ip,
         destination_ip,
+        ipv4_get_version(packet->ipv4),
+        (unsigned long)ip_header_length,
+        ip_total_length,
         (unsigned int)packet->ipv4->ttl,
-        ip_protocol_name(packet->ipv4->protocol),
-        (unsigned long)packet->payload_length);
+        ip_protocol_name(packet->ipv4->protocol));
+    printf("IPv4 detail: id=%u %s transport+data=%u bytes\n",
+        (unsigned int)ntohs(packet->ipv4->identification),
+        fragment_info,
+        ip_payload_length);
 
     if (packet->icmp != NULL) {
         printf("ICMP: type=%u code=%u id=%u seq=%u\n",

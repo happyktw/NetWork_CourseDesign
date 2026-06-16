@@ -70,3 +70,11 @@
 147	3789	8032075518897402	CMakeFiles/network_course_design.dir/src/ftp_server.c.obj	5ebee5ab13222790
 65	4134	8032075522312636	CMakeFiles/network_course_design.dir/src/main.c.obj	f3362cc906884cd8
 4134	4544	8032075526187455	network_course_design.exe	bbb6f7ff31f87e44
+143	782	8032198621722873	CMakeFiles/network_course_design.dir/src/datalink_sim.c.obj	e0a4744f5fd55892
+161	807	8032198622032208	CMakeFiles/network_course_design.dir/src/utils.c.obj	421baf989d5430a2
+132	1197	8032198625941110	CMakeFiles/network_course_design.dir/src/network_io.c.obj	fd9069189ae20f97
+138	1239	8032198626403500	CMakeFiles/network_course_design.dir/src/protocol_parser.c.obj	5b3b63e1e6c1677b
+42	1289	8032198626904335	CMakeFiles/network_course_design.dir/src/main.c.obj	f3362cc906884cd8
+155	1297	8032198626966925	CMakeFiles/network_course_design.dir/src/ftp_client.c.obj	cda688f6e750d377
+150	1333	8032198627341645	CMakeFiles/network_course_design.dir/src/ftp_server.c.obj	5ebee5ab13222790
+1333	1657	8032198630524961	network_course_design.exe	bbb6f7ff31f87e44

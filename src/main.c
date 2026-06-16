@@ -168,6 +168,26 @@ static int run_capture_demo(int protocol_filter)
     return 0;
 }
 
+static int run_capture_demo_all(void)
+{
+    int status;
+
+    printf("=== TCP demo ===\n");
+    status = run_capture_demo(IP_PROTO_TCP);
+    if (status != 0) {
+        return status;
+    }
+
+    printf("\n=== UDP demo ===\n");
+    status = run_capture_demo(IP_PROTO_UDP);
+    if (status != 0) {
+        return status;
+    }
+
+    printf("\n=== ICMP demo ===\n");
+    return run_capture_demo(IP_PROTO_ICMP);
+}
+
 static int run_live_capture(const char *local_ip, int protocol_filter)
 {
     SOCKET capture_socket;
@@ -412,7 +432,7 @@ int main(int argc, char *argv[])
         }
 
         if (argc == 3 && strcmp(argv[2], "demo") == 0) {
-            return run_capture_demo(IP_PROTO_TCP);
+            return run_capture_demo_all();
         }
         if (argc == 4 && strcmp(argv[2], "demo") == 0) {
             return run_capture_demo(protocol_filter);
